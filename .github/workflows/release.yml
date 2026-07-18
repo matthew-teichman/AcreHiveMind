@@ -40,11 +40,21 @@ jobs:
         uses: conda-incubator/setup-miniconda@v3
         with:
           auto-update-conda: true
-          activate-environment: gdal-env
-
       - name: Install GDAL via Conda
         shell: pwsh
-        run: conda install -y -c conda-forge gdal=3.7.0
+        run: |
+          conda create -y -n gdal-env -c conda-forge python=3.10 gdal=3.7.0
+          $condaPath = conda info --base
+          $libPath = "$condaPath\envs\gdal-env\Library\lib"
+          $incPath = "$condaPath\envs\gdal-env\Library\include"
+          echo "GDAL_LIB_DIR=$libPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "GDAL_INCLUDE_DIR=$incPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if (Test-Path "$libPath\gdal.lib") {
+              if (-not (Test-Path "$libPath\gdal_i.lib")) {
+                  Copy-Item "$libPath\gdal.lib" "$libPath\gdal_i.lib"
+              }
+          }
+          Remove-Item -Force src-tauri\.cargo\config.toml -ErrorAction SilentlyContinue
 
       - name: Determine Next Version
         id: version
@@ -65,9 +75,6 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Overwrite the hardcoded vcpkg paths in .cargo/config.toml to use Conda's fast prebuilt binaries instead
-          GDAL_LIB_DIR: "C:\\Miniconda\\envs\\gdal-env\\Library\\lib"
-          GDAL_INCLUDE_DIR: "C:\\Miniconda\\envs\\gdal-env\\Library\\include"
         with:
           tagName: ${{ steps.version.outputs.next_version }}
           releaseName: "Release ${{ steps.version.outputs.next_version }}"
