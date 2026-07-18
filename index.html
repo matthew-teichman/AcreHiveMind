@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AcreHiveMind - Farm Management</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- MapLibre GL CSS -->
+    <link href="https://unpkg.com/maplibre-gl@3.x/dist/maplibre-gl.css" rel="stylesheet" />
+    <!-- KaTeX CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" />
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script type="module" src="/src/main.ts" defer></script>
+  <body>
+    <div class="app-layout">
+      <!-- Sidebar -->
+      <nav class="sidebar glass-panel">
+        <div class="brand">
+          <h2>AcreHiveMind</h2>
+          <img src="/logo.png" alt="AcreHiveMind Logo" class="brand-logo" />
+        </div>
+        <ul class="nav-links">
+          <li class="active"><a href="#" id="nav-map" data-view="map-container">Field Map</a></li>
+          <li><a href="#" id="nav-management" data-view="table-container">Field Management</a></li>
+          <li><a href="#" id="nav-agentic" data-view="agentic-container">Agentic Recommendation</a></li>
+          <li><a href="#" id="nav-schedule" data-view="schedule-container">Scheduling</a></li>
+          <li><a href="#" id="nav-settings" data-view="settings-container">Settings</a></li>
+        </ul>
+        <div class="status-indicator">
+          <span class="dot" id="sidebar-weather-dot"></span> <span id="sidebar-weather-text">Weather: Not Synced</span>
+        </div>
+      </nav>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <header class="top-header glass-panel">
+          <div class="header-title"></div>
+          <div class="actions">
+            <div id="selected-field-info" class="field-info hidden">
+              <span id="field-info-text">Selected Field: N/A</span>
+              <button id="btn-deselect-field" class="btn small tertiary">Close</button>
+              <button id="btn-undo-field" class="btn small warning hidden" style="background-color: #f59e0b; border-color: #f59e0b; color: white;">Undo</button>
+              <button id="btn-edit-field" class="btn small secondary">Edit</button>
+              <button id="btn-optimize-field" class="btn small primary" style="background-color: #8b5cf6; border-color: #8b5cf6; color: white;">Optimize</button>
+              <button id="btn-delete-field" class="btn small danger">Delete</button>
+            </div>
+            <div id="selected-obstacle-info" class="field-info hidden">
+              <span id="obstacle-info-text">Selected Obstacle: N/A</span>
+              <button id="btn-deselect-obstacle" class="btn-close">&times;</button>
+            </div>
+            <button class="btn secondary hidden" id="btn-edit-obstacle">Edit Obstacle</button>
+            <button class="btn danger hidden" id="btn-delete-obstacle">Delete Obstacle</button>
+            <button class="btn secondary hidden" id="btn-add-obstacle">Add Obstacle</button>
+            <button class="btn secondary" id="btn-add-field">+ Add Field</button>
+          </div>
+        </header>
+        
+        <!-- Global Progress Bar for Weather Sync -->
+        <div id="weather-sync-progress-container" class="glass-panel hidden" style="padding: 8px 16px; display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+          <span id="weather-sync-progress-text" style="font-size: 14px; font-weight: 600; min-width: 150px; color: var(--text-primary);">Syncing Weather...</span>
+          <div style="flex-grow: 1; height: 8px; background: var(--bg-secondary); border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color);">
+            <div id="weather-sync-progress-bar" style="height: 100%; width: 0%; background: #8b5cf6; transition: width 0.3s ease;"></div>
+          </div>
+        </div>
+        
+        <!-- Status bar for drawing mode -->
+        <div id="drawing-status" class="glass-panel hidden">
+          <span>Drawing Mode: Click on the map to define the field boundary. Click the starting point to finish.</span>
+          <button class="btn small" id="btn-cancel-draw">Cancel</button>
+        </div>
+        
+        <div class="content-area">
+          <div id="map-container" class="glass-panel view-container active"></div>
+          
+          <!-- Suggestion banner -->
+          <div id="map-suggestion-banner" class="glass-panel map-hint hidden">
+            <span>Get started by adding a field using the "+ Add Field" button.</span>
+          </div>
+          
+          
+
+          <div id="table-container" class="glass-panel view-container hidden">
+            <!-- Table View -->
+            <div id="field-table-view" style="display: flex; flex-direction: column; flex-grow: 1; overflow: hidden;">
+              <div class="table-header" style="display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
+                <h2 style="margin: 0;">All Fields</h2>
+                <button id="btn-sync-weather" class="btn secondary" style="display: flex; align-items: center; gap: 8px;">
+                  <span id="sync-weather-text">Weather Update</span>
+                  <div id="weather-sync-spinner" class="spinner hidden" style="width: 16px; height: 16px; border-width: 2px;"></div>
+                </button>
+              </div>
+              <div class="table-wrapper" style="flex-grow: 1; overflow-y: auto;">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th title="The unique identifier or name of the field">Field Name</th>
+                      <th title="The primary crop planned for this field">Planned Crop</th>
+                      <th title="The current growth or operational stage of the field">Stage</th>
+                      <th title="Total calculated area of the field in hectares">Area (ha)</th>
+                      <th title="Number of known obstacles in the field (e.g., rocks, trees)">Obstacles</th>
+                      <th title="Total precipitation accumulated over the past 365 days">1-Yr Rainfall</th>
+                      <th title="Total sun exposure (solar radiation) over the past 365 days">1-Yr Sun Exp.</th>
+                      <th title="Average soil temperature (0-7cm depth) over the past 365 days">Avg Soil Temp</th>
+                      <th title="Average soil moisture (0-7cm depth) over the past 365 days">Avg Soil Moist.</th>
+                      <th title="Total Evapotranspiration (ET0) over the past 365 days">1-Yr ET</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fields-table-body">
+                    <tr>
+                      <td colspan="4" class="text-center text-muted" style="text-align: center; padding: 32px; color: var(--text-secondary);">Get started by adding a field using the "+ Add Field" button.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            
+            <!-- Details View -->
+            <div id="field-details-view" class="hidden" style="display: flex; flex-direction: column; flex-grow: 1; overflow-y: hidden; padding: 0 32px 32px 32px;">
+              <div class="table-header" style="display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--border-glass);">
+                <div style="display: flex; gap: 16px;">
+                  <button id="btn-back-to-table" class="btn secondary" style="margin-top: 2px;">&larr; Back</button>
+                  <div style="display: flex; flex-direction: column;">
+                    <h2 id="weather-modal-title" style="margin: 0; margin-bottom: 6px;">Field Data</h2>
+                    <div id="weather-field-metadata" style="font-size: 14px; color: var(--text-secondary); display: flex; gap: 16px; flex-wrap: wrap;">
+                      <span id="meta-crop"></span>
+                      <span id="meta-stage"></span>
+                      <span id="meta-area"></span>
+                      <span id="meta-rain"></span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Tab Navigation -->
+              <div class="tabs-nav" style="display: flex; gap: 16px; border-bottom: 1px solid var(--border-color); margin-bottom: 16px;">
+                 <button class="tab-btn active" data-tab="tab-weather" style="background: none; border: none; padding: 8px 16px; color: var(--text-primary); cursor: pointer; border-bottom: 2px solid #8b5cf6; font-weight: 600;">Weather</button>
+                 <button class="tab-btn" data-tab="tab-agronomy" style="background: none; border: none; padding: 8px 16px; color: var(--text-secondary); cursor: pointer;">Advanced Agronomy</button>
+              </div>
+
+              <!-- Tab Content: Weather -->
+              <div id="tab-weather" class="tab-pane active" style="display: flex; flex-direction: column; flex-grow: 1; overflow-y: auto;">
+                <div class="weather-panel" style="background: var(--surface-hover); padding: 12px 16px; border-radius: 12px; margin-bottom: 12px; flex-shrink: 0;">
+                  <h3 style="margin-bottom: 8px;">16-Day Forecast</h3>
+                  <div id="weather-16day-content" class="forecast-slider">
+                    <p style="font-size: 14px; color: var(--text-secondary);">Loading forecast...</p>
+                  </div>
+                </div>
+
+                <div class="weather-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; flex-shrink: 0;">
+                  <!-- Long-Term Climate Outlook -->
+                  <div class="weather-panel" style="background: var(--surface-hover); padding: 12px 16px; border-radius: 12px;">
+                    <h3 style="margin-bottom: 4px;">Long-Term Climate Outlook</h3>
+                    <p id="weather-climate-content" style="font-size: 14px; color: var(--text-secondary);">Loading outlook...</p>
+                  </div>
+                  
+                  <!-- Soil & Hydrology Data -->
+                  <div class="weather-panel" style="background: var(--surface-hover); padding: 12px 16px; border-radius: 12px;">
+                    <h3 style="margin-bottom: 4px;">Soil & Hydrology Data</h3>
+                    <p id="weather-soil-content" style="font-size: 14px; color: var(--text-secondary);">Loading soil data...</p>
+                  </div>
+                </div>
+
+                <!-- Chart Area -->
+                <div class="weather-panel" style="background: var(--surface-hover); padding: 12px 16px; border-radius: 12px; flex-grow: 1; display: flex; flex-direction: column; min-height: 250px;">
+                  <h3 style="margin-bottom: 8px;">5-Year Historical Data</h3>
+                  <div style="position: relative; flex-grow: 1; width: 100%;">
+                    <canvas id="weather-chart"></canvas>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tab Content: Advanced Agronomy -->
+              <div id="tab-agronomy" class="tab-pane hidden" style="display: flex; flex-direction: column; flex-grow: 1; overflow: hidden;">
+                 <div style="display: flex; gap: 16px; margin-bottom: 12px; align-items: stretch; flex-shrink: 0;">
+                    <div id="field-data-mini-map" style="width: 280px; min-height: 220px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); overflow: hidden; flex-shrink: 0; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></div>
+                    <div style="flex-grow: 1; background: var(--surface-hover); padding: 12px 16px; border-radius: 12px; display: flex; flex-direction: column; overflow-y: auto;">
+                       <h3 style="margin-bottom: 12px; font-size: 15px;">Agronomy Metrics & NDVI Overlay</h3>
+                       <div id="agronomy-metrics-content" style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px;">
+                          <!-- Populated via JS -->
+                          <p>Loading metrics...</p>
+                       </div>
+                       <!-- NDVI Info Inline Widget -->
+                       <div id="ndvi-info-widget" style="background: rgba(23, 25, 35, 0.4); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; margin-top: 12px; transition: all 0.3s ease;">
+                         <div class="ndvi-widget-header" style="cursor: pointer; display: flex; align-items: center; padding: 10px; border-bottom: 1px solid transparent;">
+                           <span class="ndvi-widget-icon" style="margin-right: 8px; font-size: 14px;">🌱</span>
+                           <h4 style="margin: 0; flex-grow: 1; font-size: 13px; font-weight: 600;">Understanding NDVI</h4>
+                           <button id="btn-toggle-ndvi-info" class="btn-close" style="background: none; border: none; color: var(--text-secondary); cursor: pointer;">&times;</button>
+                         </div>
+                         <div id="ndvi-info-content" class="ndvi-widget-content" style="padding: 0 10px 10px 10px; font-size: 11.5px; color: var(--text-secondary); border-top: 1px solid rgba(255, 255, 255, 0.05); margin-top: 2px; padding-top: 10px;">
+                           <div style="margin-bottom: 10px;">
+                             <div style="display: flex; justify-content: space-between; font-size: 10px; margin-bottom: 4px; font-weight: 600;">
+                               <span style="color: rgb(160, 82, 45);">Sparse/Stressed</span>
+                               <span style="color: rgb(173, 255, 47);">Moderate</span>
+                               <span style="color: rgb(0, 100, 0);">Dense/Healthy</span>
+                             </div>
+                             <div style="height: 6px; border-radius: 3px; background: linear-gradient(to right, rgb(160, 82, 45), rgb(173, 255, 47), rgb(0, 100, 0)); width: 100%;"></div>
+                           </div>
+                           <p style="margin: 0 0 4px 0; line-height: 1.3;"><strong>Normalized Difference Vegetation Index (NDVI)</strong> is a satellite-derived metric used to quantify vegetation health.</p>
+                           <p style="margin: 0 0 4px 0; line-height: 1.3;">It works by measuring the difference between near-infrared light (which vegetation strongly reflects) and red light (which vegetation absorbs).</p>
+                           <p style="margin: 0; line-height: 1.3;"><strong>Significance:</strong> It allows early detection of crop stress, disease, uneven irrigation, and nutrient deficiency before they are visible to the naked eye.</p>
+                         </div>
+                       </div>
+                    </div>
+                 </div>
+                 
+                 <!-- Subsurface Soil Profile Chart -->
+                 <div class="weather-panel" style="background: var(--surface-hover); padding: 8px 16px; border-radius: 12px; flex-grow: 1; display: flex; flex-direction: column; min-height: 0;">
+                    <h3 style="margin-bottom: 4px; font-size: 15px;">Subsurface Soil Profile</h3>
+                    <div style="position: relative; flex-grow: 1; width: 100%; min-height: 0;">
+                      <canvas id="soil-profile-chart"></canvas>
+                    </div>
+                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="schedule-container" class="glass-panel view-container hidden">
+            <div class="table-header">
+              <h2>Scheduling Calendar</h2>
+              <div class="calendar-controls">
+                <button id="btn-prev-month" class="btn secondary small">&larr; Prev</button>
+                <span id="calendar-current-month" class="calendar-month-label">Month Year</span>
+                <button id="btn-next-month" class="btn secondary small">Next &rarr;</button>
+              </div>
+            </div>
+            <div class="calendar-wrapper">
+              <div class="calendar-header-row">
+                <div class="cal-header">Sun</div>
+                <div class="cal-header">Mon</div>
+                <div class="cal-header">Tue</div>
+                <div class="cal-header">Wed</div>
+                <div class="cal-header">Thu</div>
+                <div class="cal-header">Fri</div>
+                <div class="cal-header">Sat</div>
+              </div>
+              <div id="calendar-grid" class="calendar-grid">
+                <!-- Calendar days populated via JS -->
+              </div>
+            </div>
+          </div>
+
+          <div id="agentic-container" class="glass-panel view-container hidden" style="display: flex; flex-direction: column; overflow: hidden; padding: 0; background-color: var(--bg-primary);">
+            <div class="table-header" style="border-bottom: 1px solid var(--border-glass); padding: 12px 24px; background: var(--bg-secondary); display: flex; justify-content: space-between; align-items: center;">
+              <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 20px;">🧠</span> Agentic Recommendation
+                <span id="agentic-current-provider" style="font-size: 12px; padding: 4px 8px; background: rgba(0,0,0,0.2); border-radius: 12px; color: var(--text-secondary); margin-left: 8px;">Gemini</span>
+              </h2>
+              <button id="btn-agentic-clear" class="btn secondary small">Clear History</button>
+            </div>
+            <div id="agentic-chat-history" class="chat-history" style="flex-grow: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+              <!-- Chat messages will be injected here -->
+            </div>
+            <div class="chat-input-area" style="padding: 16px 24px; background: var(--bg-primary);">
+              <form id="agentic-chat-form" style="display: flex; gap: 12px; align-items: flex-end; background: var(--surface-hover); border-radius: 24px; padding: 8px 16px; border: 1px solid var(--border-glass);">
+                <textarea id="agentic-chat-input" placeholder="Ask for farming recommendations..." style="flex-grow: 1; resize: none; border: none; background: transparent; color: var(--text-primary); padding: 8px 0; font-family: inherit; font-size: 15px; min-height: 40px; max-height: 150px; outline: none;" rows="1"></textarea>
+                <button type="submit" class="btn primary" id="btn-agentic-send" style="height: 40px; width: 40px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </button>
+              </form>
+            </div>
+          </div>
+
+          <div id="settings-container" class="glass-panel view-container hidden">
+            <div class="table-header">
+              <h2>Profile Settings</h2>
+            </div>
+            <div class="settings-grid">
+              <div class="settings-form-col">
+                <form id="settings-profile-form" class="profile-form">
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="settings-first-name">First Name</label>
+                      <input type="text" id="settings-first-name" required placeholder="e.g. John" />
+                    </div>
+                    <div class="form-group">
+                      <label for="settings-last-name">Last Name (Optional)</label>
+                      <input type="text" id="settings-last-name" placeholder="e.g. Doe" />
+                    </div>
+                  </div>
+                  
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="settings-email">Email Address</label>
+                      <input type="email" id="settings-email" required placeholder="e.g. john.doe@example.com" />
+                    </div>
+                    
+                    <div class="form-group">
+                      <label for="settings-climate-model">Climate Model</label>
+                      <select id="settings-climate-model" required>
+                        <option value="MPI_ESM1_2_XR">MPI-ESM1.2-XR (High Res)</option>
+                        <option value="CMCC_CM2_VHR4">CMCC-CM2-VHR4 (Very High Res)</option>
+                        <option value="FGOALS_f3_H">FGOALS-f3-H</option>
+                        <option value="MRI_AGCM3_2_S">MRI-AGCM3.2S</option>
+                        <option value="EC_Earth3P_HR">EC-Earth3P-HR</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="settings-llm-provider">LLM Provider</label>
+                      <select id="settings-llm-provider">
+                        <option value="gemini">Gemini (Cloud)</option>
+                        <option value="ollama">Ollama (Local)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="settings-gemini-key">Gemini API Key <span class="text-muted">(Optional)</span></label>
+                      <input type="password" id="settings-gemini-key" placeholder="AIza..." />
+                    </div>
+                    <div class="form-group">
+                      <label for="settings-gemini-model">Gemini Model</label>
+                      <div style="display: flex; gap: 8px;">
+                        <select id="settings-gemini-model" style="flex: 1;">
+                          <option value="models/gemini-1.5-flash-latest">gemini-1.5-flash-latest</option>
+                        </select>
+                        <button type="button" class="btn secondary" id="btn-refresh-gemini-models" style="padding: 0 12px;" title="Refresh Models from API">🔄</button>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label for="settings-ollama-url">Ollama URL <span class="text-muted">(Optional)</span></label>
+                      <input type="text" id="settings-ollama-url" placeholder="http://localhost:11434" />
+                    </div>
+                  </div>
+
+                  <div class="form-group autocomplete-container">
+                    <label for="settings-address">Farm Address <span class="text-muted">(Optional if coordinates provided)</span></label>
+                    <input type="text" id="settings-address" placeholder="e.g. 1600 Amphitheatre Pkwy, Mountain View, CA" autocomplete="off" />
+                    <div id="settings-address-dropdown" class="autocomplete-dropdown hidden"></div>
+                  </div>
+                  
+                  <div class="form-row coords-row">
+                    <div class="form-group">
+                      <label for="settings-lat">Latitude</label>
+                      <input type="text" id="settings-lat" placeholder="e.g. 45.4215" required />
+                    </div>
+                    <div class="form-group">
+                      <label for="settings-lng">Longitude</label>
+                      <input type="text" id="settings-lng" placeholder="e.g. -75.6972" required />
+                    </div>
+                  </div>
+                  
+                  <div class="settings-actions">
+                    <button type="submit" class="btn primary" id="btn-save-settings">Save Profile</button>
+                    <button type="button" class="btn danger" id="btn-factory-reset">Factory Reset</button>
+                    <button type="button" class="btn secondary" id="btn-settings-clear-chat">Clear Chat History</button>
+                    <button type="button" class="btn secondary" id="btn-theme-toggle">🌙 Dark Mode</button>
+                    <div id="settings-status-message" class="status-message hidden"></div>
+                  </div>
+                </form>
+                
+                <div class="model-info-card" style="margin-top: 2rem; padding: 1.5rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                  <h3 style="margin-top: 0; margin-bottom: 1rem; color: var(--text-primary);">Model Information</h3>
+                  <p style="margin-bottom: 0.5rem; display: flex; justify-content: space-between;"><strong>Name:</strong> <span id="model-name" class="text-muted">Loading...</span></p>
+                  <p style="margin-bottom: 0.5rem; display: flex; justify-content: space-between;"><strong>Version:</strong> <span id="model-version" class="text-muted">Loading...</span></p>
+                  <p style="margin-bottom: 0.5rem; display: flex; justify-content: space-between;"><strong>Last Updated:</strong> <span id="model-updated" class="text-muted">Loading...</span></p>
+                  <p style="margin-bottom: 0; display: flex; justify-content: space-between;"><strong>Status:</strong> <span id="model-status" class="text-muted">Checking...</span></p>
+                </div>
+              </div>
+              <div class="settings-map-col">
+                <div id="settings-mini-map" class="mini-map-container"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- Add Field Modal -->
+    <div id="add-field-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel">
+        <h2>Save New Field</h2>
+        <form id="add-field-form">
+          <div class="form-group">
+            <label for="field-name">Field Name</label>
+            <input type="text" id="field-name" placeholder="e.g. North Pasture" required />
+          </div>
+          <div class="form-group">
+            <label for="field-crop">Planned Crop (Optional)</label>
+            <input type="text" id="field-crop" placeholder="e.g. Corn, Soybeans" />
+          </div>
+          <div class="form-group">
+            <label for="field-stage">Current Stage</label>
+            <select id="field-stage" required>
+              <option value="Preparing" selected>Preparing</option>
+              <option value="Planting">Planting</option>
+              <option value="Vegetative">Vegetative</option>
+              <option value="Reproductive">Reproductive</option>
+              <option value="Harvest">Harvest</option>
+              <option value="Winter">Winter</option>
+            </select>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn secondary" id="btn-modal-cancel">Cancel</button>
+            <button type="submit" class="btn primary">Save Field</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    
+    <!-- Add Obstacle Modal -->
+    <div id="add-obstacle-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel">
+        <h2>Add Obstacle</h2>
+        <form id="add-obstacle-form">
+          <div class="form-group">
+            <label for="obstacle-type">Type</label>
+            <select id="obstacle-type" required>
+              <option value="Creek">Creek</option>
+              <option value="Forest">Forest</option>
+              <option value="Tree Stump">Tree Stump</option>
+              <option value="Tree">Tree</option>
+              <option value="Gate">Gate</option>
+              <option value="Bird Nest">Bird Nest</option>
+              <option value="Water Logged">Water Logged</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="obstacle-note">Additional Note (Optional)</label>
+            <textarea id="obstacle-note" placeholder="e.g. Needs clearing" rows="3"></textarea>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="btn secondary" id="btn-modal-obstacle-cancel">Cancel</button>
+            <button type="submit" class="btn primary">Place Obstacle</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    
+    <!-- Onboarding Overlay -->
+    <div id="onboarding-overlay" class="onboarding-overlay hidden">
+      <div class="onboarding-card glass-panel">
+        
+        <!-- Step 1: Welcome -->
+        <div id="onboarding-step-1" class="onboarding-step active">
+          <div class="onboarding-header">
+            <h1>Welcome to AcreHiveMind</h1>
+            <p>AcreHiveMind helps you manage your farm fields, view recommendations, and optimize your schedule. Let's create your profile to get started.</p>
+          </div>
+          <div class="onboarding-graphics">
+            <div class="welcome-badge">
+              <span class="pulsing-glow"></span>
+              <img src="/logo.png" alt="AcreHiveMind Logo" style="width: 72px; height: 72px; object-fit: contain; position: relative; z-index: 1;" />
+            </div>
+          </div>
+          <button type="button" class="btn primary" id="btn-onboarding-start">Get Started</button>
+        </div>
+
+        <!-- Step 2: Personal Details -->
+        <div id="onboarding-step-2" class="onboarding-step">
+          <div class="onboarding-header">
+            <h2>Personal Information</h2>
+          </div>
+          <div class="form-group">
+            <label for="onboarding-first-name">First Name</label>
+            <input type="text" id="onboarding-first-name" placeholder="e.g. Jane" required />
+          </div>
+          <div class="form-group">
+            <label for="onboarding-last-name">Last Name <span class="text-muted">(Optional)</span></label>
+            <input type="text" id="onboarding-last-name" placeholder="e.g. Smith" />
+          </div>
+          <div class="form-group">
+            <label for="onboarding-email">Email Address</label>
+            <input type="email" id="onboarding-email" placeholder="e.g. jane.smith@example.com" required />
+          </div>
+          <div class="onboarding-actions">
+            <button type="button" class="btn secondary" id="btn-onboarding-back-1">Back</button>
+            <button type="button" class="btn primary" id="btn-onboarding-next-2">Next</button>
+          </div>
+        </div>
+
+        <!-- Step 3: Address & Location -->
+        <div id="onboarding-step-3" class="onboarding-step">
+          <div class="onboarding-header">
+            <h2>Farm Location</h2>
+            <p>Enter your farm address or coordinates. We will use it to center your interactive field map.</p>
+          </div>
+          
+          <div class="location-type-selector">
+            <button type="button" class="location-tab-btn active" id="btn-location-address">Use Address</button>
+            <button type="button" class="location-tab-btn" id="btn-location-coords">Use Coordinates</button>
+          </div>
+
+          <div id="onboarding-address-group" class="form-group autocomplete-container">
+            <label for="onboarding-address">Farm Address</label>
+            <input type="text" id="onboarding-address" placeholder="e.g. 1600 Amphitheatre Pkwy, Mountain View, CA" autocomplete="off" />
+            <div id="onboarding-address-dropdown" class="autocomplete-dropdown hidden"></div>
+          </div>
+
+          <div id="onboarding-coords-group" class="form-row hidden">
+            <div class="form-group">
+              <label for="onboarding-lat">Latitude</label>
+              <input type="text" id="onboarding-lat" placeholder="e.g. 45.4215" />
+            </div>
+            <div class="form-group">
+              <label for="onboarding-lng">Longitude</label>
+              <input type="text" id="onboarding-lng" placeholder="e.g. -75.6972" />
+            </div>
+          </div>
+          
+          <div id="onboarding-map-container" class="form-group hidden" style="margin-top: 16px;">
+            <label>Locate your Farmhouse <span class="text-muted">(Drag to adjust)</span></label>
+            <div id="onboarding-mini-map" class="mini-map-container" style="min-height: 200px; margin-bottom: 12px;"></div>
+          </div>
+
+          <div class="form-group" style="margin-top: 16px;">
+            <label for="onboarding-climate-model">Climate Model</label>
+            <select id="onboarding-climate-model" required>
+              <option value="MPI_ESM1_2_XR" selected>MPI-ESM1.2-XR (High Res)</option>
+              <option value="CMCC_CM2_VHR4">CMCC-CM2-VHR4 (Very High Res)</option>
+              <option value="FGOALS_f3_H">FGOALS-f3-H</option>
+              <option value="MRI_AGCM3_2_S">MRI-AGCM3.2S</option>
+              <option value="EC_Earth3P_HR">EC-Earth3P-HR</option>
+            </select>
+          </div>
+
+          <div id="onboarding-geocode-error" class="error-message hidden">
+            Failed to locate address. Please check spelling and try again.
+          </div>
+          
+          <div class="onboarding-actions">
+            <button type="button" class="btn secondary" id="btn-onboarding-back-2">Back</button>
+            <button type="button" class="btn primary" id="btn-onboarding-finish">
+              <span id="btn-finish-text">Finish Setup</span>
+              <span id="btn-finish-spinner" class="spinner hidden"></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Progress dots -->
+        <div class="onboarding-progress">
+          <span class="progress-dot active" data-step="1"></span>
+          <span class="progress-dot" data-step="2"></span>
+          <span class="progress-dot" data-step="3"></span>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- MapLibre JS & Mapbox Draw JS are bundled via Vite -->
+    <!-- Debug Modal -->
+    <div id="debug-modal" class="modal-overlay hidden">
+      <div class="modal-content glass-panel" style="width: 90vw; max-width: 1024px; max-height: 90vh; overflow-y: auto;">
+        <h2 style="margin-top: 0;">Segmentation Debug</h2>
+        <p>This shows the raw output from MobileSAM before geometric processing.</p>
+        <img id="debug-image" style="width: 100%; height: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md);" />
+        <div class="modal-actions" style="margin-top: 1rem; justify-content: flex-end;">
+          <button id="btn-close-debug" class="btn secondary">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modals End -->
+
+  </body>
+</html>

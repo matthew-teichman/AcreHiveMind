@@ -1,0 +1,4 @@
+[env]
+GDAL_LIB_DIR = "C:\\vcpkg\\installed\\x64-windows\\lib"
+GDAL_INCLUDE_DIR = "C:\\vcpkg\\installed\\x64-windows\\include"
+GDAL_VERSION = "3.7.0"

@@ -1,0 +1,42 @@
+[package]
+name = "acremind"
+version = "0.1.0"
+description = "AI Farming Assistant"
+authors = ["Matthew Teichman"]
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "acremind_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.31.0", features = ["bundled"] }
+image = "0.25.10"
+imageproc = "0.27.0"
+reqwest = { version = "0.13.4", features = ["json"] }
+tokio = { version = "1.52.3", features = ["full"] }
+axum = "0.7.5"
+tower-http = { version = "0.5.2", features = ["cors"] }
+gdal = "0.16.0"
+geo = "0.33.1"
+geo-booleanop = "0.3.2"
+ndarray = "0.17.2"
+base64 = "0.22.1"
+bytes = "1.12.0"
+futures-util = "0.3.32"
+ort = "2.0.0-rc.12"
+tauri-plugin-dialog = "2"
+chrono = { version = "0.4.45", features = ["serde"] }
+

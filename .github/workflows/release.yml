@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Setup Miniconda (Fast Prebuilt GDAL)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          activate-environment: gdal-env
+
+      - name: Install GDAL via Conda
+        shell: pwsh
+        run: conda install -y -c conda-forge gdal=3.7.0
+
+      - name: Determine Next Version
+        id: version
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const version = fs.readFileSync('VERSION', 'utf8').trim();
+            core.setOutput('next_version', `v${version}`);
+
+      - name: Ensure target directory exists for DLL copy
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri\target\release
+          Copy-Item src-tauri\dependencies\*.dll src-tauri\target\release\ -ErrorAction SilentlyContinue
+
+      - name: Build and Release Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Overwrite the hardcoded vcpkg paths in .cargo/config.toml to use Conda's fast prebuilt binaries instead
+          GDAL_LIB_DIR: "C:\\Miniconda\\envs\\gdal-env\\Library\\lib"
+          GDAL_INCLUDE_DIR: "C:\\Miniconda\\envs\\gdal-env\\Library\\include"
+        with:
+          tagName: ${{ steps.version.outputs.next_version }}
+          releaseName: "Release ${{ steps.version.outputs.next_version }}"
+          releaseBody: "Automated release triggered by merging into main."
+          releaseDraft: false
+          prerelease: false
