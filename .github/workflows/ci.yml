@@ -70,10 +70,21 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - name: Setup Miniconda (Fast Prebuilt GDAL)
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+      - name: Install GDAL via Conda
+        run: conda create -y -n gdal-env -c conda-forge python=3.10 gdal=3.7.0
       - name: Install Tauri OS Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
       - name: Run Cargo Test
         working-directory: ./src-tauri
-        run: cargo test
+        run: |
+          rm -f .cargo/config.toml
+          condaPath=$(conda info --base)
+          export PKG_CONFIG_PATH="$condaPath/envs/gdal-env/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$condaPath/envs/gdal-env/lib:$LD_LIBRARY_PATH"
+          cargo test
