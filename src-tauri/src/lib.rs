@@ -7,6 +7,7 @@ mod weather;
 mod agronomy_math;
 mod weather_api;
 mod satellite;
+mod mcp_server;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
@@ -353,14 +354,13 @@ async fn optimize_field(
     Ok((field, debug_img_b64))
 }
 
-#[tauri::command]
-async fn get_field_statistics(
-    state: tauri::State<'_, db::DbState>,
+pub async fn get_field_statistics_inner(
+    db_state: &db::DbState,
     field_id: i64,
 ) -> Result<crate::weather_api::AgronomyMetrics, String> {
     let (lat, lng) = {
         // 1. Check Cache
-        let conn_lock = state.conn.lock().map_err(|e| e.to_string())?;
+        let conn_lock = db_state.conn.lock().map_err(|e| e.to_string())?;
         
         if let Ok(Some((cached_json, minutes_old))) = db::get_agronomy_cache(&conn_lock, field_id) {
             if minutes_old < 6 * 60 {
@@ -400,7 +400,7 @@ async fn get_field_statistics(
     
     // 4. Save to cache
     if let Ok(json) = serde_json::to_string(&metrics) {
-        let conn_lock_again = state.conn.lock().map_err(|e| e.to_string())?;
+        let conn_lock_again = db_state.conn.lock().map_err(|e| e.to_string())?;
         let _ = db::set_agronomy_cache(&conn_lock_again, field_id, &json);
     }
     
@@ -408,9 +408,41 @@ async fn get_field_statistics(
 }
 
 #[tauri::command]
-fn get_chat_history(state: tauri::State<'_, db::DbState>) -> Result<Vec<db::ChatMessage>, String> {
+async fn get_field_statistics(
+    state: tauri::State<'_, db::DbState>,
+    field_id: i64,
+) -> Result<crate::weather_api::AgronomyMetrics, String> {
+    get_field_statistics_inner(&state, field_id).await
+}
+
+#[tauri::command]
+fn get_chat_sessions(state: tauri::State<'_, db::DbState>) -> Result<Vec<db::ChatSession>, String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    db::get_chat_history(&conn).map_err(|e| e.to_string())
+    db::get_chat_sessions(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_chat_session(state: tauri::State<'_, db::DbState>, title: String) -> Result<i64, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    db::create_chat_session(&conn, &title).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_chat_session_title(state: tauri::State<'_, db::DbState>, session_id: i64, title: String) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    db::update_chat_session_title(&conn, session_id, &title).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_chat_session(state: tauri::State<'_, db::DbState>, session_id: i64) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    db::delete_chat_session(&conn, session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_chat_history(state: tauri::State<'_, db::DbState>, session_id: i64) -> Result<Vec<db::ChatMessage>, String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    db::get_chat_history(&conn, session_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -420,9 +452,21 @@ fn add_chat_message(state: tauri::State<'_, db::DbState>, msg: db::ChatMessage) 
 }
 
 #[tauri::command]
-fn clear_chat_history(state: tauri::State<'_, db::DbState>) -> Result<(), String> {
+fn clear_chat_history(state: tauri::State<'_, db::DbState>, session_id: i64) -> Result<(), String> {
     let conn = state.conn.lock().map_err(|e| e.to_string())?;
-    db::clear_chat_history(&conn).map_err(|e| e.to_string())
+    db::clear_chat_history(&conn, session_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn increment_token_usage(state: tauri::State<'_, db::DbState>, amount: i64) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    db::increment_token_usage(&conn, amount).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reset_token_usage(state: tauri::State<'_, db::DbState>) -> Result<(), String> {
+    let conn = state.conn.lock().map_err(|e| e.to_string())?;
+    db::reset_token_usage(&conn).map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -490,9 +534,10 @@ pub fn run() {
                 });
             });
 
-            // Start Axum microservice for satellite processing
+            // Start Axum microservice for satellite processing and MCP
+            let axum_app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                crate::satellite::start_server().await;
+                crate::satellite::start_server(axum_app_handle).await;
             });
 
             Ok(())
@@ -519,9 +564,15 @@ pub fn run() {
             crate::weather::trigger_weather_sync,
             show_main_window,
             close_splashscreen,
+            get_chat_sessions,
+            create_chat_session,
+            update_chat_session_title,
+            delete_chat_session,
             get_chat_history,
             add_chat_message,
             clear_chat_history,
+            increment_token_usage,
+            reset_token_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

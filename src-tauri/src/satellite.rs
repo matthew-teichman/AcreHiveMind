@@ -1,7 +1,8 @@
 use axum::{
-    routing::post,
+    routing::{post, get},
     Router,
     Json,
+    extract::{State, Query},
     response::IntoResponse,
     http::{header, StatusCode, Method},
 };
@@ -13,11 +14,17 @@ use tower_http::cors::{CorsLayer, Any};
 use std::io::Cursor;
 use image::{ImageBuffer, Rgba};
 use gdal::Dataset;
+use tauri::Manager;
 
 #[derive(Deserialize)]
 pub struct NdviRequest {
-    // Expecting a GeoJSON Polygon or simply a list of lat/lng points
     pub points: Vec<crate::tiles::LatLng>, 
+}
+
+#[derive(Deserialize)]
+pub struct NdviQuery {
+    #[serde(rename = "fieldId")]
+    pub field_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -29,23 +36,24 @@ pub struct StacQuery {
     pub query_filter: Value,
 }
 
-pub fn create_router() -> Router {
+pub fn create_router(app_handle: tauri::AppHandle) -> Router {
+    Router::new()
+        .route("/api/ndvi", post(handle_ndvi).get(handle_ndvi_get))
+        .with_state(app_handle)
+}
+
+pub async fn start_server(app_handle: tauri::AppHandle) {
+    // GDAL config for /vsicurl/
+    gdal::config::set_config_option("GDAL_HTTP_UNSAFESSL", "YES").unwrap();
+    gdal::config::set_config_option("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", "tif").unwrap();
+
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([Method::POST, Method::GET])
         .allow_headers(Any);
 
-    Router::new()
-        .route("/api/ndvi", post(handle_ndvi))
-        .layer(cors)
-}
-
-pub async fn start_server() {
-    // GDAL config for /vsicurl/
-    gdal::config::set_config_option("GDAL_HTTP_UNSAFESSL", "YES").unwrap();
-    gdal::config::set_config_option("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", "tif").unwrap();
-
-    let app = create_router();
+    let mcp_router = crate::mcp_server::create_mcp_router(app_handle.clone());
+    let app = create_router(app_handle).merge(mcp_router).layer(cors);
     let addr = SocketAddr::from(([127, 0, 0, 1], 3030));
     println!("Axum microservice listening on {}", addr);
     
@@ -53,17 +61,61 @@ pub async fn start_server() {
     axum::serve(listener, app).await.unwrap();
 }
 
+async fn handle_ndvi_get(
+    State(app_handle): State<tauri::AppHandle>,
+    Query(query): Query<NdviQuery>,
+) -> impl IntoResponse {
+    let field_id = match query.field_id {
+        Some(id) => id,
+        None => return (StatusCode::BAD_REQUEST, "Missing fieldId parameter").into_response(),
+    };
+
+    let points = {
+        let db_state = app_handle.state::<crate::db::DbState>();
+        let conn = match db_state.conn.lock() {
+            Ok(c) => c,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database lock failed").into_response(),
+        };
+
+        let fields = match crate::db::get_all_fields(&conn) {
+            Ok(f) => f,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Database error").into_response(),
+        };
+        
+        let field = match fields.into_iter().find(|f| f.id == Some(field_id)) {
+            Some(f) => f,
+            None => return (StatusCode::NOT_FOUND, "Field not found").into_response(),
+        };
+
+        let parsed: Vec<crate::tiles::LatLng> = match serde_json::from_str(&field.points_json) {
+            Ok(p) => p,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Invalid field points JSON").into_response(),
+        };
+        parsed
+    };
+
+    if points.is_empty() {
+        return (StatusCode::BAD_REQUEST, "Field has no points").into_response();
+    }
+
+    generate_ndvi_image(points).await
+}
+
 async fn handle_ndvi(Json(payload): Json<NdviRequest>) -> impl IntoResponse {
     if payload.points.is_empty() {
         return (StatusCode::BAD_REQUEST, "No points provided").into_response();
     }
 
+    generate_ndvi_image(payload.points).await
+}
+
+async fn generate_ndvi_image(points: Vec<crate::tiles::LatLng>) -> axum::response::Response {
     // Bounding Box in WGS84
-    let mut min_lat = payload.points[0].lat;
-    let mut max_lat = payload.points[0].lat;
-    let mut min_lng = payload.points[0].lng;
-    let mut max_lng = payload.points[0].lng;
-    for p in &payload.points {
+    let mut min_lat = points[0].lat;
+    let mut max_lat = points[0].lat;
+    let mut min_lng = points[0].lng;
+    let mut max_lng = points[0].lng;
+    for p in &points {
         if p.lat < min_lat { min_lat = p.lat; }
         if p.lat > max_lat { max_lat = p.lat; }
         if p.lng < min_lng { min_lng = p.lng; }

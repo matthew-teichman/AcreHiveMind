@@ -95,3 +95,11 @@ We enforce semantic versioning for all contributions.
 - When your PR is merged into `main`, the `release.yml` workflow automatically reads your bumped `VERSION` file, builds the `.exe` for Windows, and publishes a new GitHub Release with the new tag.
 
 For more detailed information on architecture and specific components, please check the [Documentation](DOCUMENTATION.md).
+
+---
+
+## 🤖 Model Context Protocol (MCP) Integration
+AcreHiveMind features a native Rust-based Model Context Protocol (MCP) server that empowers LLMs to fetch database information without needing Node.js or any external runtimes.
+
+The server implements strict zero-trust boundary limits. Privacy guardrails exist natively on the backend to prevent the LLM from accessing sensitive personal keys and data (e.g., Gemini keys, exact coordinates).
+The testing pipelines ensure absolute deterministic guarantees for Data Completeness and Privacy filtering constraints.

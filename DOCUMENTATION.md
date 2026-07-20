@@ -32,8 +32,31 @@ AcreHiveMind is a farm management desktop application built using **Tauri**, **V
 2. **Field Management Table**: Tabular view of all fields tracking their current stage, area, and summarized weather statistics.
 3. **Scheduling Calendar**: A scrollable monthly calendar on the Scheduling tab that displays historical weather and a 16-day forecast for the farm, complete with dynamic weather icons (including support for winter conditions like Snow and Freezing Rain) and precipitation tracking.
 4. **Weather Modals**: 16-day forecasts, long-term climate outlooks, soil/hydrology data, and a 5-year historical Chart.js visualization.
-5. **Onboarding & Settings**: Geocoding via Photon API to easily locate farms via address or coordinates, and profile settings for customizing the application.
-6. **Local LLM & ML Status**: A status indicator in the UI hints at local LLM capabilities, while `ml_workspace` is set up for image segmentation.
+5. **Agentic Recommendation (LLM Integration)**: A ChatGPT-style split-pane chat interface where farmers can ask for agronomic advice. Features include:
+   - **Provider Support**: Seamless support for both **Google Gemini** (via API key) and local, private models via **Ollama**.
+   - **Chat History**: Infinite scrollable sidebar of chat history. Sessions automatically generate their own titles by analyzing the user's first prompt.
+   - **Token Tracking**: Persistent token usage tracking across both LLM providers.
+6. **Onboarding & Settings**: Geocoding via Photon API to easily locate farms via address or coordinates, and profile settings for customizing the application.
+
+## Model Context Protocol (MCP) Architecture
+To grant the LLM profound context about the farm, AcreHiveMind implements the **Model Context Protocol (MCP)**. 
+
+### How it Works
+1. **Backend Server**: The Rust backend spins up an independent Axum microservice (`http://127.0.0.1:3030`) that serves two primary MCP endpoints:
+   - `GET /mcp/sse`: Establishes a Server-Sent Events stream to push Tool definitions to the client.
+   - `POST /mcp/messages`: Accepts JSON-RPC tool invocations and executes them securely inside the Rust sandbox, querying the SQLite database or external APIs.
+2. **Frontend Intermediary**: `main.ts` connects to `/mcp/sse`, dynamically parses the available tools, and seamlessly translates them into both Gemini's Function Calling schema and Ollama's OpenAI Tool schema.
+3. **Autonomous Execution Loop**: When the user sends a prompt, the frontend enters a `while` loop. If the LLM requests a tool (e.g., `get_field_and_weather_data`), the frontend automatically POSTs that request to the Rust MCP backend, waits for the result, and loops it back into the LLM context. This continues until the LLM yields a final text response. Timeouts are gracefully handled and communicated to the LLM.
+
+### LLM Data Access (Available Tools)
+Through MCP, the AI acts autonomously and has real-time access to the following data sources:
+1. **`get_field_and_weather_data(fieldId)`**: The flagship tool. Provides the AI with:
+   - Basic field properties (Crop, Stage, Area).
+   - Recent historical weather and the full 16-day predictive forecast.
+   - **5-Year Historical Summaries**: Aggregated annual precipitation and sun exposure totals for the past 5 years to determine historical baselines.
+   - **Advanced Agronomy Metrics**: `deltaT` (evaluating spraying suitability), `inversionRisk`, `trafficability`, `growingDegreeDays`, `wind`, `humidity`, `leafWetness`, and `subsurfaceSoilProfiles`.
+2. **`get_calendar_events(fieldId)`**: Fetches all logged farm events, tasks, verification tokens, and text notes associated with the field.
+3. **`get_ndvi_heatmap(fieldId)`**: Generates a procedurally evaluated NDVI satellite heatmap of the field. The LLM can render this directly in the chat via Markdown linking to `http://127.0.0.1:3030/api/ndvi?fieldId={}`.
 
 ## Development Commands
 - `npm run dev`: Starts the Vite development server.
