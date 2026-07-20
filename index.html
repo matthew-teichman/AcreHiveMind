@@ -246,24 +246,38 @@
             </div>
           </div>
 
-          <div id="agentic-container" class="glass-panel view-container hidden" style="display: flex; flex-direction: column; overflow: hidden; padding: 0; background-color: var(--bg-primary);">
-            <div class="table-header" style="border-bottom: 1px solid var(--border-glass); padding: 12px 24px; background: var(--bg-secondary); display: flex; justify-content: space-between; align-items: center;">
-              <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 20px;">🧠</span> Agentic Recommendation
-                <span id="agentic-current-provider" style="font-size: 12px; padding: 4px 8px; background: rgba(0,0,0,0.2); border-radius: 12px; color: var(--text-secondary); margin-left: 8px;">Gemini</span>
-              </h2>
-              <button id="btn-agentic-clear" class="btn secondary small">Clear History</button>
-            </div>
-            <div id="agentic-chat-history" class="chat-history" style="flex-grow: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
-              <!-- Chat messages will be injected here -->
-            </div>
-            <div class="chat-input-area" style="padding: 16px 24px; background: var(--bg-primary);">
-              <form id="agentic-chat-form" style="display: flex; gap: 12px; align-items: flex-end; background: var(--surface-hover); border-radius: 24px; padding: 8px 16px; border: 1px solid var(--border-glass);">
-                <textarea id="agentic-chat-input" placeholder="Ask for farming recommendations..." style="flex-grow: 1; resize: none; border: none; background: transparent; color: var(--text-primary); padding: 8px 0; font-family: inherit; font-size: 15px; min-height: 40px; max-height: 150px; outline: none;" rows="1"></textarea>
-                <button type="submit" class="btn primary" id="btn-agentic-send" style="height: 40px; width: 40px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+          <div id="agentic-container" class="glass-panel view-container hidden" style="display: flex; overflow: hidden; padding: 0; background-color: var(--bg-primary);">
+            <!-- Sidebar for Sessions -->
+            <div id="agentic-sidebar" style="width: 260px; border-right: 1px solid var(--border-glass); background: var(--bg-secondary); display: flex; flex-direction: column;">
+              <div style="padding: 16px;">
+                <button id="btn-agentic-new-chat" class="btn primary" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span>+</span> New Chat
                 </button>
-              </form>
+              </div>
+              <div id="agentic-sessions-list" style="flex-grow: 1; overflow-y: auto; padding: 0 16px 16px 16px; display: flex; flex-direction: column; gap: 8px;">
+                <!-- Chat session items injected here -->
+              </div>
+            </div>
+            
+            <!-- Main Chat Area -->
+            <div style="flex-grow: 1; display: flex; flex-direction: column; overflow: hidden;">
+              <div class="table-header" style="border-bottom: 1px solid var(--border-glass); padding: 12px 24px; background: var(--bg-secondary); display: flex; justify-content: space-between; align-items: center;">
+                <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                  <span id="agentic-active-session-title">Agentic Recommendation</span>
+                  <span id="agentic-current-provider" style="font-size: 12px; padding: 4px 8px; background: rgba(0,0,0,0.2); border-radius: 12px; color: var(--text-secondary); margin-left: 8px;">Gemini</span>
+                </h2>
+              </div>
+              <div id="agentic-chat-history" class="chat-history" style="flex-grow: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+                <!-- Chat messages will be injected here -->
+              </div>
+              <div class="chat-input-area" style="padding: 16px 24px; background: var(--bg-primary);">
+                <form id="agentic-chat-form" style="display: flex; gap: 12px; align-items: flex-end; background: var(--surface-hover); border-radius: 24px; padding: 8px 16px; border: 1px solid var(--border-glass);">
+                  <textarea id="agentic-chat-input" placeholder="Ask for farming recommendations..." style="flex-grow: 1; resize: none; border: none; background: transparent; color: var(--text-primary); padding: 8px 0; font-family: inherit; font-size: 15px; min-height: 40px; max-height: 150px; outline: none;" rows="1"></textarea>
+                  <button type="submit" class="btn primary" id="btn-agentic-send" style="height: 40px; width: 40px; padding: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                  </button>
+                </form>
+              </div>
             </div>
           </div>
 
@@ -310,6 +324,14 @@
                         <option value="gemini">Gemini (Cloud)</option>
                         <option value="ollama">Ollama (Local)</option>
                       </select>
+                    </div>
+                    <div class="form-group" style="display: flex; flex-direction: column; justify-content: space-between;">
+                      <label>AI Token Usage</label>
+                      <div style="display: flex; gap: 8px; align-items: center; padding-top: 8px;">
+                        <span id="settings-token-usage" style="font-size: 1.2rem; font-weight: bold; color: var(--text-primary);">0</span>
+                        <span style="color: var(--text-secondary);">tokens</span>
+                        <button type="button" class="btn secondary small" id="btn-reset-tokens" style="margin-left: auto; padding: 4px 12px; font-size: 13px;">Reset</button>
+                      </div>
                     </div>
                   </div>
 

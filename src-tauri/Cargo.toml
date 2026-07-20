@@ -39,4 +39,5 @@ futures-util = "0.3.32"
 ort = "2.0.0-rc.12"
 tauri-plugin-dialog = "2"
 chrono = { version = "0.4.45", features = ["serde"] }
+async-stream = "0.3.6"
 

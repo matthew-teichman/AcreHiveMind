@@ -4,6 +4,8 @@ import { message, confirm } from "@tauri-apps/plugin-dialog";
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import katexExtension from 'marked-katex-extension';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 
 marked.use(katexExtension({
   throwOnError: false
@@ -25,10 +27,19 @@ interface UserProfile {
   geminiModel?: string;
   ollamaUrl?: string;
   llmProvider?: string;
+  tokenUsage?: number;
+}
+
+interface ChatSession {
+  id: number;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface ChatMessage {
   id?: number;
+  sessionId: number;
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
@@ -810,6 +821,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const geminiModelSelect = document.getElementById("settings-gemini-model") as HTMLSelectElement | null;
     const ollamaUrlInput = document.getElementById("settings-ollama-url") as HTMLInputElement | null;
     const llmProviderSelect = document.getElementById("settings-llm-provider") as HTMLSelectElement | null;
+    const tokenUsageDisplay = document.getElementById("settings-token-usage");
     
     if (firstNameInput) firstNameInput.value = profileData.firstName;
     if (lastNameInput) lastNameInput.value = profileData.lastName || "";
@@ -821,6 +833,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (geminiKeyInput) geminiKeyInput.value = profileData.geminiApiKey || "";
     if (ollamaUrlInput) ollamaUrlInput.value = profileData.ollamaUrl || "";
     if (llmProviderSelect) llmProviderSelect.value = profileData.llmProvider || "gemini";
+    if (tokenUsageDisplay) tokenUsageDisplay.textContent = (profileData.tokenUsage || 0).toString();
     if (geminiModelSelect) {
       // If the profile has a model that isn't in the options yet, add it
       if (profileData.geminiModel) {
@@ -1380,7 +1393,8 @@ window.addEventListener("DOMContentLoaded", async () => {
           geminiApiKey: geminiApiKey || undefined,
           geminiModel: geminiModel || undefined,
           ollamaUrl: ollamaUrl || undefined,
-          llmProvider
+          llmProvider,
+          tokenUsage: profile?.tokenUsage || 0
         };
         
         try {
@@ -1467,22 +1481,40 @@ window.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Factory Reset button
-  const factoryResetBtn = document.getElementById("btn-factory-reset");
-  if (factoryResetBtn) {
-    factoryResetBtn.addEventListener("click", async () => {
-      const confirmReset = await confirm("Are you sure you want to factory reset AcreHiveMind? This will delete your profile and all fields, and restart onboarding.", { title: 'AcreHiveMind', kind: 'warning' });
+  const btnFactoryReset = document.getElementById('btn-factory-reset');
+  if (btnFactoryReset) {
+    btnFactoryReset.addEventListener('click', async () => {
+      const confirmReset = await confirm("Are you sure you want to reset everything? This will delete all fields and data. You will need to complete onboarding again.", { title: 'AcreHiveMind - Factory Reset', kind: 'warning' });
       if (confirmReset) {
         try {
-          await invoke("factory_reset");
-          localStorage.clear();
+          await invoke('factory_reset');
+          localStorage.removeItem('onboardingComplete');
+          localStorage.removeItem('lastWeatherSync');
+          localStorage.removeItem('lastWeatherSyncIso');
           window.location.reload();
         } catch (err) {
-          console.error("Failed to reset database:", err);
-          await message('Failed to factory reset database: ' + err, { title: 'AcreHiveMind' });
+          console.error("Factory reset failed:", err);
+          await message('Factory reset failed: ' + err, { title: 'AcreHiveMind' });
         }
       }
     });
   }
+
+  const btnResetTokens = document.getElementById('btn-reset-tokens');
+  if (btnResetTokens) {
+    btnResetTokens.addEventListener('click', async () => {
+      try {
+        await invoke('reset_token_usage');
+        if (profile) profile.tokenUsage = 0;
+        const display = document.getElementById('settings-token-usage');
+        if (display) display.textContent = "0";
+      } catch (err) {
+        console.error("Failed to reset token usage:", err);
+      }
+    });
+  }
+
+  // Handle onboarding location tabs
 
   // Theme Toggle Button
   const btnThemeToggle = document.getElementById("btn-theme-toggle");
@@ -1988,12 +2020,13 @@ window.addEventListener("DOMContentLoaded", async () => {
         
         if (targetViewId === 'settings-container') {
           loadModelInfo();
+          if (profile) populateSettingsForm(profile);
         }
         if (targetViewId === 'schedule-container') {
           renderCalendar();
         }
         if (targetViewId === 'agentic-container') {
-          loadChatHistory();
+          loadChatSessions();
         }
       }
     });
@@ -2351,16 +2384,113 @@ window.addEventListener("DOMContentLoaded", async () => {
   const chatHistory = document.getElementById('agentic-chat-history');
   const chatForm = document.getElementById('agentic-chat-form') as HTMLFormElement;
   const chatInput = document.getElementById('agentic-chat-input') as HTMLTextAreaElement;
-  const btnClearChat = document.getElementById('btn-agentic-clear') as HTMLButtonElement;
   const btnSettingsClearChat = document.getElementById('btn-settings-clear-chat') as HTMLButtonElement;
+  const agenticSidebarList = document.getElementById('agentic-sessions-list');
+  const btnAgenticNewChat = document.getElementById('btn-agentic-new-chat') as HTMLButtonElement;
+  const activeSessionTitleEl = document.getElementById('agentic-active-session-title');
   
-  let chatLoaded = false;
+  let chatSessionsLoaded = false;
+  let activeSessionId: number | null = null;
+  let allSessions: ChatSession[] = [];
+
+  async function loadChatSessions() {
+    if (chatSessionsLoaded) return;
+    try {
+      allSessions = await invoke('get_chat_sessions');
+      
+      // If no sessions exist, create one
+      if (allSessions.length === 0) {
+        await invoke('create_chat_session', { title: "New Chat" });
+        allSessions = await invoke('get_chat_sessions'); // reload to get the struct
+      }
+      
+      if (!activeSessionId && allSessions.length > 0) {
+        activeSessionId = allSessions[0].id;
+      }
+      
+      renderSessionsSidebar();
+      if (activeSessionId) {
+        await loadChatHistory(activeSessionId);
+      }
+      
+      chatSessionsLoaded = true;
+    } catch (e) {
+      console.error("Failed to load chat sessions:", e);
+    }
+  }
+
+  function renderSessionsSidebar() {
+    if (!agenticSidebarList) return;
+    agenticSidebarList.innerHTML = '';
+    
+    allSessions.forEach(session => {
+      const item = document.createElement('div');
+      item.className = `chat-session-item ${session.id === activeSessionId ? 'active' : ''}`;
+      
+      const titleSpan = document.createElement('span');
+      titleSpan.className = 'chat-session-title';
+      titleSpan.textContent = session.title;
+      
+      const delBtn = document.createElement('button');
+      delBtn.className = 'session-delete-btn';
+      delBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>';
+      delBtn.title = "Delete Chat";
+      
+      delBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const confirmDelete = await confirm(`Are you sure you want to delete "${session.title}"?`, { title: 'AcreHiveMind', kind: 'warning' });
+        if (confirmDelete) {
+          await invoke('delete_chat_session', { sessionId: session.id });
+          allSessions = allSessions.filter(s => s.id !== session.id);
+          
+          if (allSessions.length === 0) {
+             const newId: number = await invoke('create_chat_session', { title: "New Chat" });
+             allSessions = await invoke('get_chat_sessions');
+             activeSessionId = newId;
+          } else if (activeSessionId === session.id) {
+             activeSessionId = allSessions[0].id;
+          }
+          renderSessionsSidebar();
+          if (activeSessionId) await loadChatHistory(activeSessionId);
+        }
+      });
+      
+      item.appendChild(titleSpan);
+      item.appendChild(delBtn);
+      
+      item.addEventListener('click', async () => {
+        if (activeSessionId !== session.id) {
+          activeSessionId = session.id;
+          renderSessionsSidebar();
+          await loadChatHistory(session.id);
+        }
+      });
+      
+      agenticSidebarList.appendChild(item);
+    });
+    
+    if (activeSessionTitleEl) {
+      const activeSession = allSessions.find(s => s.id === activeSessionId);
+      activeSessionTitleEl.textContent = activeSession ? activeSession.title : "Agentic Recommendation";
+    }
+  }
+
+  if (btnAgenticNewChat) {
+    btnAgenticNewChat.addEventListener('click', async () => {
+       const newId: number = await invoke('create_chat_session', { title: "New Chat" });
+       allSessions = await invoke('get_chat_sessions');
+       activeSessionId = newId;
+       renderSessionsSidebar();
+       await loadChatHistory(newId);
+    });
+  }
 
   async function handleClearChat() {
-    const confirmClear = await confirm("Are you sure you want to clear your entire chat history?", { title: 'AcreHiveMind', kind: 'warning' });
+    if (!activeSessionId) return;
+    const confirmClear = await confirm("Are you sure you want to clear the active chat history?", { title: 'AcreHiveMind', kind: 'warning' });
     if (confirmClear) {
       try {
-        await invoke("clear_chat_history");
+        await invoke("clear_chat_history", { sessionId: activeSessionId });
         if (chatHistory) chatHistory.innerHTML = '';
         await message("Chat history cleared.", { title: 'AcreHiveMind' });
       } catch (e) {
@@ -2370,25 +2500,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  if (btnClearChat) {
-    btnClearChat.addEventListener('click', handleClearChat);
-  }
-
   if (btnSettingsClearChat) {
     btnSettingsClearChat.addEventListener('click', handleClearChat);
   }
 
-  async function loadChatHistory() {
-    if (chatLoaded) return;
+  async function loadChatHistory(sessionId: number) {
     try {
-      const messages: ChatMessage[] = await invoke('get_chat_history');
+      const messages: ChatMessage[] = await invoke('get_chat_history', { sessionId });
       if (chatHistory) {
         chatHistory.innerHTML = '';
-        messages.forEach(msg => {
-          appendMessageToUI(msg);
-        });
+        for (const msg of messages) {
+          await appendMessageToUI(msg);
+        }
       }
-      chatLoaded = true;
       setTimeout(scrollToBottom, 100);
     } catch (e) {
       console.error("Failed to load chat history:", e);
@@ -2458,6 +2582,61 @@ window.addEventListener("DOMContentLoaded", async () => {
     return indicator;
   }
 
+  async function generateChatTitle(prompt: string, provider: string, profile: UserProfile | null): Promise<string> {
+    const instruction = `Generate a very short, concise title (maximum 4 words) for this prompt. Do not include quotes or any other text, just the title itself. Prompt: "${prompt}"`;
+    try {
+      if (provider === 'gemini') {
+        if (!profile?.geminiApiKey) return "New Chat";
+        const model = profile.geminiModel || 'models/gemini-1.5-flash-latest';
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${profile.geminiApiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: instruction }] }],
+            generationConfig: { maxOutputTokens: 20 }
+          })
+        });
+        if (!res.ok) return "New Chat";
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        return text ? text.replace(/["']/g, '').trim() : "New Chat";
+      } else {
+        const ollamaUrl = profile?.ollamaUrl || 'http://localhost:11434';
+        let selectedModel = 'llama3.2';
+        
+        try {
+          const tagsRes = await fetch(`${ollamaUrl}/api/tags`);
+          if (tagsRes.ok) {
+            const tagsData = await tagsRes.json();
+            if (tagsData.models && tagsData.models.length > 0) {
+              const hasLlama = tagsData.models.some((m: any) => m.name.startsWith('llama3.2'));
+              if (!hasLlama) selectedModel = tagsData.models[0].name;
+            }
+          }
+        } catch (e) {
+          // ignore tag fetch failure
+        }
+        
+        const res = await fetch(`${ollamaUrl}/api/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: selectedModel,
+            prompt: instruction,
+            stream: false,
+            options: { num_predict: 20 }
+          })
+        });
+        if (!res.ok) return "New Chat";
+        const data = await res.json();
+        return data.response ? data.response.replace(/["']/g, '').trim() : "New Chat";
+      }
+    } catch (e) {
+      console.error("AI Title generation error:", e);
+      return "New Chat";
+    }
+  }
+
   if (chatForm && chatInput) {
     chatInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -2474,7 +2653,13 @@ window.addEventListener("DOMContentLoaded", async () => {
 
       const provider = profile?.llmProvider || 'gemini';
       
+      if (!activeSessionId) {
+         console.error("No active session ID!");
+         return;
+      }
+      
       const userMsg: ChatMessage = {
+        sessionId: activeSessionId,
         role: 'user',
         content,
         timestamp: new Date().toISOString(),
@@ -2485,11 +2670,36 @@ window.addEventListener("DOMContentLoaded", async () => {
       scrollToBottom();
       try {
         await invoke('add_chat_message', { msg: userMsg });
+        
+        // Auto-rename session if it's named "New Chat"
+        const activeSession = allSessions.find(s => s.id === activeSessionId);
+        if (activeSession && activeSession.title === "New Chat") {
+           const sessionIdToUpdate = activeSessionId;
+           // Run title generation in background so it doesn't block the UI
+           generateChatTitle(content, provider, profile).then(async (newTitle) => {
+              if (newTitle && newTitle !== "New Chat") {
+                 await invoke('update_chat_session_title', { sessionId: sessionIdToUpdate, title: newTitle });
+                 const sessionToUpdate = allSessions.find(s => s.id === sessionIdToUpdate);
+                 if (sessionToUpdate) {
+                    sessionToUpdate.title = newTitle;
+                    renderSessionsSidebar();
+                 }
+              }
+           });
+        }
       } catch (e) {
         console.error("Failed to save user msg:", e);
       }
 
       const indicator = showTypingIndicator();
+
+      let historyMessages: ChatMessage[] = [];
+      try {
+        historyMessages = await invoke('get_chat_history', { sessionId: activeSessionId });
+      } catch (e) {
+        console.error("Failed to fetch history for LLM", e);
+        historyMessages = [userMsg];
+      }
 
       try {
         let assistantContent = '';
@@ -2499,59 +2709,287 @@ window.addEventListener("DOMContentLoaded", async () => {
             assistantContent = 'Error: Please configure your Gemini API Key in Settings.';
           } else {
             const m = profile.geminiModel || 'models/gemini-1.5-flash-latest';
-            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${m}:generateContent?key=${profile.geminiApiKey}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                contents: [
-                  {
-                    parts: [{ text: "You are a helpful farming assistant named Agentic Recommendation.\n\n" + content }]
-                  }
-                ]
-              })
-            });
-            const data = await res.json();
             
+            // 1. Initialize MCP Client over SSE
+            const transport = new SSEClientTransport(new URL('http://127.0.0.1:3030/mcp/sse'));
+            const mcpClient = new Client({ name: "acremind-frontend", version: "1.0.0" }, { capabilities: {} });
+            await mcpClient.connect(transport);
+            
+            // 2. Fetch available tools from backend
+            const { tools } = await mcpClient.listTools();
+            const geminiTools = tools.map(t => ({
+              name: t.name,
+              description: t.description,
+              parameters: t.inputSchema
+            }));
+
+            // 3. Prepare initial message to Gemini
+            let chatMessages = historyMessages.map(msg => ({
+              role: msg.role === 'user' ? 'user' : 'model',
+              parts: [{ text: msg.content }]
+            }));
+
+            const fetchWithTimeout = async (url: string, options: any, timeoutMs = 15000) => {
+              const controller = new AbortController();
+              const id = setTimeout(() => controller.abort(), timeoutMs);
+              try {
+                const response = await fetch(url, {
+                  ...options,
+                  signal: controller.signal
+                });
+                clearTimeout(id);
+                return response;
+              } catch (err) {
+                clearTimeout(id);
+                throw err;
+              }
+            };
+
+            const makeGeminiRequest = async (messages: any[]) => {
+              const res = await fetchWithTimeout(`https://generativelanguage.googleapis.com/v1beta/${m}:generateContent?key=${profile!.geminiApiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: messages,
+                  systemInstruction: {
+                    parts: [{ text: "You are a helpful farming assistant named Agentic Recommendation. Always use your tools to retrieve ground truth data instead of hallucinating. Do NOT introduce yourself or say 'Hello! I am Agentic Recommendation, your farming assistant' in your responses. Get straight to answering the user's question using the data retrieved." }]
+                  },
+                  tools: geminiTools.length > 0 ? [{ functionDeclarations: geminiTools }] : undefined
+                })
+              });
+              return res;
+            };
+
+            let res = await makeGeminiRequest(chatMessages);
+            let data = await res.json();
+            let accumulatedTokens = 0;
+            if (data.usageMetadata && data.usageMetadata.totalTokenCount) {
+              accumulatedTokens += data.usageMetadata.totalTokenCount;
+            }
+
             if (data.error) {
               assistantContent = `Gemini API Error: ${data.error.message}`;
-            } else if (data.candidates && data.candidates.length > 0) {
-              const parts = data.candidates[0].content.parts;
-              if (parts.length > 1) {
-                // If there are multiple parts, the first is usually the thought process
-                thoughtsContent = parts[0].text;
-                assistantContent = parts[1].text;
-              } else {
-                assistantContent = parts[0].text;
-              }
             } else {
-              assistantContent = "Gemini returned an empty response.";
+              // 4. Handle Tool Calls via loop (tool chaining)
+              let loopCount = 0;
+              const maxLoops = 5;
+              while (data.candidates && data.candidates.length > 0 && loopCount < maxLoops) {
+                loopCount++;
+                const parts = data.candidates[0].content.parts;
+                const funcPart = parts.find((p: any) => p.functionCall);
+                
+                if (funcPart) {
+                  const func = funcPart.functionCall;
+                  console.log("LLM invoked tool:", func.name, func.args);
+                  
+                  // Append model's tool call request to chat history payload
+                  chatMessages.push(data.candidates[0].content);
+                  
+                  // Execute the tool locally via MCP with a timeout
+                  let toolResultText = "";
+                  try {
+                    const toolPromise = mcpClient.callTool({
+                      name: func.name,
+                      arguments: func.args
+                    });
+                    const timeoutPromise = new Promise((_, reject) => 
+                      setTimeout(() => reject(new Error(`MCP Tool call to '${func.name}' timed out after 15s`)), 15000)
+                    );
+                    const toolResponse = await Promise.race([toolPromise, timeoutPromise]);
+                    
+                    // Construct the tool response part
+                    toolResultText = ((toolResponse as any).content || []).map((c: any) => c.text).join('\n');
+                  } catch (e: any) {
+                    console.error("Tool execution failed:", e);
+                    toolResultText = `Error executing tool: ${e.message || e.toString()}`;
+                  }
+                  
+                  chatMessages.push({
+                    role: "function",
+                    parts: [{
+                      functionResponse: {
+                        name: func.name,
+                        response: {
+                          name: func.name,
+                          content: toolResultText
+                        }
+                      }
+                    } as any]
+                  });
+
+                  // Send the tool response back to Gemini to continue the loop
+                  res = await makeGeminiRequest(chatMessages);
+                  data = await res.json();
+                  if (data.usageMetadata && data.usageMetadata.totalTokenCount) {
+                    accumulatedTokens += data.usageMetadata.totalTokenCount;
+                  }
+                  
+                  if (data.error) {
+                    assistantContent = `Gemini API Error: ${data.error.message}`;
+                    break;
+                  }
+                } else {
+                  // No more tool calls, we have the final text
+                  if (parts.length > 1) {
+                    thoughtsContent = parts[0].text;
+                    assistantContent = parts.map((p: any) => p.text).filter((t: any) => t).join('\n');
+                  } else {
+                    assistantContent = parts[0].text;
+                  }
+                  break;
+                }
+              }
+              
+              if (loopCount >= maxLoops) {
+                assistantContent = "Error: Stopped execution to prevent an infinite tool call loop.";
+              }
+              
+              if (!assistantContent) {
+                assistantContent = "Gemini returned an empty response.";
+              }
+              
+              if (accumulatedTokens > 0) {
+                 try {
+                   await invoke('increment_token_usage', { amount: accumulatedTokens });
+                   if (profile) profile.tokenUsage = (profile.tokenUsage || 0) + accumulatedTokens;
+                   const display = document.getElementById('settings-token-usage');
+                   if (display) {
+                     display.textContent = profile!.tokenUsage!.toString();
+                   }
+                 } catch (e) {
+                   console.error("Failed to increment token usage", e);
+                 }
+              }
             }
           }
         } else {
           // Ollama
           const ollamaUrl = profile?.ollamaUrl || 'http://localhost:11434';
-          const res = await fetch(`${ollamaUrl}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model: 'llama3.2',
-              prompt: content,
-              stream: false
-            })
-          });
-          const data = await res.json();
+          let selectedModel = 'llama3.2';
+          
+          try {
+            const tagsRes = await fetch(`${ollamaUrl}/api/tags`);
+            if (tagsRes.ok) {
+              const tagsData = await tagsRes.json();
+              if (tagsData.models && tagsData.models.length > 0) {
+                const hasLlama = tagsData.models.some((m: any) => m.name.startsWith('llama3.2'));
+                if (!hasLlama) {
+                  selectedModel = tagsData.models[0].name;
+                  console.log("Auto-selected Ollama model:", selectedModel);
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("Failed to query Ollama tags API, falling back to llama3.2:", e);
+          }
+
+          const ollamaTools = tools.map(t => ({
+            type: "function",
+            function: {
+              name: t.name,
+              description: t.description,
+              parameters: t.inputSchema
+            }
+          }));
+
+          const makeOllamaRequest = async (msgs: any[]) => {
+            return await fetch(`${ollamaUrl}/api/chat`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: selectedModel,
+                messages: msgs,
+                tools: ollamaTools.length > 0 ? ollamaTools : undefined,
+                stream: false,
+                options: { num_ctx: 32768 }
+              })
+            });
+          };
+
+          let ollamaMessages: any[] = [
+            { role: 'system', content: "You are a helpful farming assistant named Agentic Recommendation. Always use your tools to retrieve ground truth data instead of hallucinating. Do NOT introduce yourself or say 'Hello! I am Agentic Recommendation, your farming assistant' in your responses. Get straight to answering the user's question using the data retrieved." },
+            ...historyMessages.map(msg => ({
+              role: msg.role,
+              content: msg.content
+            }))
+          ];
+
+          let res = await makeOllamaRequest(ollamaMessages);
+          let data = await res.json();
+          let accumulatedTokens = 0;
+          if (data.prompt_eval_count) accumulatedTokens += data.prompt_eval_count;
+          if (data.eval_count) accumulatedTokens += data.eval_count;
+
           if (data.error) {
             assistantContent = `Ollama Error: ${data.error}`;
           } else {
-            assistantContent = data.response;
+            let loopCount = 0;
+            while (data.message?.tool_calls && data.message.tool_calls.length > 0 && loopCount < 5) {
+              loopCount++;
+              ollamaMessages.push(data.message);
+
+              for (const toolCall of data.message.tool_calls) {
+                const func = toolCall.function;
+                console.log("Ollama invoked tool:", func.name, func.arguments);
+
+                let toolResultText = "";
+                try {
+                  const parsedArgs = typeof func.arguments === 'string' ? JSON.parse(func.arguments) : func.arguments;
+                  const toolPromise = mcpClient.callTool({
+                    name: func.name,
+                    arguments: parsedArgs
+                  });
+                  const timeoutPromise = new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error(`MCP Tool call to '${func.name}' timed out after 15s`)), 15000)
+                  );
+                  const toolResponse = await Promise.race([toolPromise, timeoutPromise]);
+                  toolResultText = ((toolResponse as any).content || []).map((c: any) => c.text).join('\n');
+                } catch (e: any) {
+                  console.error("Tool execution failed:", e);
+                  toolResultText = `Error executing tool: ${e.message || e.toString()}`;
+                }
+
+                ollamaMessages.push({
+                  role: "tool",
+                  content: toolResultText,
+                  name: func.name
+                });
+              }
+
+              res = await makeOllamaRequest(ollamaMessages);
+              data = await res.json();
+              if (data.prompt_eval_count) accumulatedTokens += data.prompt_eval_count;
+              if (data.eval_count) accumulatedTokens += data.eval_count;
+              
+              if (data.error) {
+                assistantContent = `Ollama Error: ${data.error}`;
+                break;
+              }
+            }
+
+            if (!data.error) {
+              assistantContent = data.message?.content || "";
+            }
+            
+            if (accumulatedTokens > 0) {
+               try {
+                 await invoke('increment_token_usage', { amount: accumulatedTokens });
+                 if (profile) profile.tokenUsage = (profile.tokenUsage || 0) + accumulatedTokens;
+                 const display = document.getElementById('settings-token-usage');
+                 if (display) {
+                   display.textContent = profile!.tokenUsage!.toString();
+                 }
+               } catch (e) {
+                 console.error("Failed to increment token usage", e);
+               }
+            }
           }
         }
 
         if (indicator) indicator.remove();
 
         const assistantMsg: ChatMessage = {
+          sessionId: activeSessionId!,
           role: 'assistant',
           content: assistantContent,
           timestamp: new Date().toISOString(),
@@ -2567,6 +3005,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         console.error("API Error:", e);
         if (indicator) indicator.remove();
         const errorMsg: ChatMessage = {
+          sessionId: activeSessionId!,
           role: 'assistant',
           content: `Connection Error: ${e}`,
           timestamp: new Date().toISOString(),
