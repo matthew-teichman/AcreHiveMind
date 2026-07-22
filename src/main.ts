@@ -2704,20 +2704,22 @@ window.addEventListener("DOMContentLoaded", async () => {
       try {
         let assistantContent = '';
         let thoughtsContent = '';
+
+        // 1. Initialize MCP Client over SSE
+        const transport = new SSEClientTransport(new URL('http://127.0.0.1:3030/mcp/sse'));
+        const mcpClient = new Client({ name: "acremind-frontend", version: "1.0.0" }, { capabilities: {} });
+        await mcpClient.connect(transport);
+        
+        // 2. Fetch available tools from backend
+        const { tools } = await mcpClient.listTools();
+
         if (provider === 'gemini') {
           if (!profile?.geminiApiKey) {
             assistantContent = 'Error: Please configure your Gemini API Key in Settings.';
           } else {
             const m = profile.geminiModel || 'models/gemini-1.5-flash-latest';
             
-            // 1. Initialize MCP Client over SSE
-            const transport = new SSEClientTransport(new URL('http://127.0.0.1:3030/mcp/sse'));
-            const mcpClient = new Client({ name: "acremind-frontend", version: "1.0.0" }, { capabilities: {} });
-            await mcpClient.connect(transport);
-            
-            // 2. Fetch available tools from backend
-            const { tools } = await mcpClient.listTools();
-            const geminiTools = tools.map(t => ({
+            const geminiTools = tools.map((t: any) => ({
               name: t.name,
               description: t.description,
               parameters: t.inputSchema
@@ -2883,7 +2885,7 @@ window.addEventListener("DOMContentLoaded", async () => {
             console.warn("Failed to query Ollama tags API, falling back to llama3.2:", e);
           }
 
-          const ollamaTools = tools.map(t => ({
+          const ollamaTools = tools.map((t: any) => ({
             type: "function",
             function: {
               name: t.name,
