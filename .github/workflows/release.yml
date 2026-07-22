@@ -49,6 +49,8 @@ jobs:
           $incPath = "$condaPath\envs\gdal-env\Library\include"
           echo "GDAL_LIB_DIR=$libPath" | Out-File -FilePath $env:GITHUB_ENV -Append
           echo "GDAL_INCLUDE_DIR=$incPath" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "GDAL_VERSION=3.7.0" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "GDAL_NO_PKG_CONFIG=1" | Out-File -FilePath $env:GITHUB_ENV -Append
           if (Test-Path "$libPath\gdal.lib") {
               if (-not (Test-Path "$libPath\gdal_i.lib")) {
                   Copy-Item "$libPath\gdal.lib" "$libPath\gdal_i.lib"
