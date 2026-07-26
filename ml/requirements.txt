@@ -1,0 +1,7 @@
+mercantile
+rasterio
+pillow
+requests
+tqdm
+opencv-python
+ultralytics

@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AcreHiveMind Web Annotator</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --bg-panel: #1e1e24;
+            --primary: #4ade80;
+            --primary-hover: #22c55e;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #sidebar {
+            width: 320px;
+            background-color: var(--bg-panel);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 10;
+            overflow-y: auto;
+        }
+
+        h1 {
+            font-size: 1.2rem;
+            margin: 0 0 20px 0;
+            color: var(--primary);
+        }
+
+        .section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+        }
+
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 10px;
+            background-color: #2a2a35;
+            color: var(--text-main);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+            text-align: left;
+        }
+
+        .btn:hover {
+            background-color: #3f3f4e;
+        }
+
+        .btn.active {
+            background-color: var(--primary);
+            color: #000;
+            border-color: var(--primary);
+            font-weight: 500;
+        }
+        
+        .btn-action {
+            background-color: #2563eb;
+            border-color: #1d4ed8;
+            text-align: center;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        
+        .btn-action:hover {
+            background-color: #1d4ed8;
+        }
+        
+        .btn-save {
+            background-color: var(--primary);
+            border-color: var(--primary-hover);
+            color: #000;
+            text-align: center;
+            font-weight: 600;
+        }
+        
+        .btn-save:hover {
+            background-color: var(--primary-hover);
+        }
+
+        #main-area {
+            flex: 1;
+            position: relative;
+            background-color: #0a0a0c;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .zoom-controls {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 20;
+        }
+        
+        .zoom-controls .btn {
+            width: auto;
+            margin: 0;
+            padding: 10px 15px;
+            text-align: center;
+        }
+
+        /* Container for scaling/panning */
+        #workspace {
+            position: relative;
+            transform-origin: 0 0;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            cursor: crosshair;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none; /* Let wrapper handle events */
+        }
+        
+        #imageCanvas { z-index: 1; }
+        #maskCanvas { z-index: 2; opacity: 0.5; }
+        #uiCanvas { z-index: 4; }
+
+        .slider-container {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .slider-container input {
+            flex: 1;
+            margin-left: 10px;
+        }
+        
+        #status-bar {
+            margin-top: auto;
+            padding: 10px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            min-height: 40px;
+        }
+        
+        .nav-row {
+            display: flex;
+            gap: 10px;
+        }
+        .nav-row .btn {
+            text-align: center;
+        }
+        
+        /* Floating Cursor Preview */
+        #cursor-preview {
+            position: absolute;
+            border: 1px solid rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 100;
+            display: none;
+            box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.8);
+            transform: translate(-50%, -50%);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <h1>🌾 AcreHiveMind<br>Web Annotator</h1>
+        
+        <div class="section">
+            <div class="section-title">Navigation</div>
+            <div id="image-info" style="margin-bottom:10px; font-size: 0.9rem; word-break: break-all;">Loading dataset...</div>
+            <div class="nav-row">
+                <button class="btn" id="btn-prev">⬅️ Prev</button>
+                <button class="btn" id="btn-next">Next ➡️</button>
+            </div>
+            <button class="btn btn-save" id="btn-save">💾 Save Mask & Next</button>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Tools</div>
+            <button class="btn active" id="tool-sam" onclick="setTool('sam')">🪄 SAM Point Tool (1)</button>
+            <button class="btn" id="tool-brush" onclick="setTool('brush')">🖌️ Manual Brush (2)</button>
+            <button class="btn" id="tool-eraser" onclick="setTool('eraser')">🧽 Manual Eraser (3)</button>
+            <button class="btn" id="tool-pan" onclick="setTool('pan')">🖐️ Pan Tool (4)</button>
+            
+            <div class="slider-container" style="margin-top: 15px;">
+                <label style="font-size: 0.85rem; color: var(--text-muted);">Brush Size:</label>
+                <input type="range" id="brush-size" min="2" max="100" value="10">
+            </div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top:10px;">
+                <b>Hold SHIFT</b> to quick-activate manual Brush (Left click) and Eraser (Right click) anytime!
+                <br><br>
+                <b>Hold SPACE</b> to Pan the image.
+            </div>
+        </div>
+        
+        <div class="section">
+            <div class="section-title">SAM Controls</div>
+            <button class="btn btn-action" id="btn-add-field" onclick="commitSAMField()">✅ Add Field (Key: a)</button>
+            <button class="btn" onclick="clearSAMPoints()">❌ Clear Points (Key: c)</button>
+            <button class="btn" onclick="resetMask()">🗑️ Reset Entire Mask</button>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Instructions</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; background: rgba(0,0,0,0.2); padding: 12px; border-radius: 6px; border: 1px solid var(--border);">
+                <b>1. Auto Segment (Key 1):</b><br>
+                • <b>Left-Click:</b> Select field (green dot)<br>
+                • <b>Right-Click:</b> Exclude area (red dot)<br>
+                • Press <b>'a'</b> to lock the field into the mask!<br><br>
+                <b>2. Quick Edit (Hold SHIFT):</b><br>
+                Hold SHIFT anytime to temporarily use brush/eraser.<br>
+                • <b>Left-Click + Drag:</b> Paint mask<br>
+                • <b>Right-Click + Drag:</b> Erase mask<br><br>
+                <b>3. View Controls:</b><br>
+                • <b>Spacebar + Drag:</b> Pan around image<br>
+                • <b>Scroll Wheel:</b> Zoom In/Out
+            </div>
+        </div>
+
+        <div id="status-bar">Ready.</div>
+    </div>
+
+    <div id="main-area">
+        <div id="workspace">
+            <canvas id="imageCanvas" width="768" height="768"></canvas>
+            <canvas id="maskCanvas" width="768" height="768"></canvas>
+            <canvas id="uiCanvas" width="768" height="768"></canvas>
+        </div>
+        
+        <div id="cursor-preview"></div>
+        
+        <div class="zoom-controls">
+            <button class="btn" onclick="zoomInOut(1.2)">➕ Zoom In</button>
+            <button class="btn" onclick="zoomInOut(0.8)">➖ Zoom Out</button>
+            <button class="btn" onclick="resetZoom()">🔄 Reset Zoom</button>
+        </div>
+    </div>
+
+<script>
+    // --- State ---
+    let dataset = [];
+    let currentIndex = 0;
+    
+    let currentTool = 'sam'; // sam, brush, eraser
+    let brushSize = 10;
+    
+    // Zoom & Pan State
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+    let isPanning = false;
+    let isSpacebarDown = false;
+    let startPanX = 0, startPanY = 0;
+    
+    // SAM State
+    let samPoints = [];
+    let samLabels = [];
+    
+    // Canvas Contexts
+    const workspace = document.getElementById('workspace');
+    const imageCanvas = document.getElementById('imageCanvas');
+    const maskCanvas = document.getElementById('maskCanvas');
+    const uiCanvas = document.getElementById('uiCanvas');
+    const cursorPreview = document.getElementById('cursor-preview');
+    
+    const ctxImage = imageCanvas.getContext('2d');
+    const ctxMask = maskCanvas.getContext('2d');
+    const ctxUi = uiCanvas.getContext('2d');
+    
+    // Setup Temp SAM Canvas
+    const tempMaskCanvas = document.createElement('canvas');
+    tempMaskCanvas.width = 768;
+    tempMaskCanvas.height = 768;
+    tempMaskCanvas.style.position = 'absolute';
+    tempMaskCanvas.style.top = '0px';
+    tempMaskCanvas.style.left = '0px';
+    tempMaskCanvas.style.zIndex = '3';
+    tempMaskCanvas.style.opacity = '0.5';
+    tempMaskCanvas.style.pointerEvents = 'none';
+    workspace.appendChild(tempMaskCanvas);
+    const ctxTempMask = tempMaskCanvas.getContext('2d');
+    
+    // Set initial size
+    workspace.style.width = '768px';
+    workspace.style.height = '768px';
+    
+    // Load dataset
+    async function init() {
+        setStatus("Loading dataset...");
+        const res = await fetch('/api/images');
+        dataset = await res.json();
+        if(dataset.length > 0) {
+            loadImage(0);
+        } else {
+            setStatus("No images found in dataset.");
+        }
+        
+        // Listeners
+        document.getElementById('btn-prev').onclick = () => loadImage(currentIndex - 1);
+        document.getElementById('btn-next').onclick = () => loadImage(currentIndex + 1);
+        document.getElementById('btn-save').onclick = saveMask;
+        document.getElementById('brush-size').oninput = (e) => {
+            brushSize = parseInt(e.target.value);
+            updateCursorPreview(lastMouseE);
+        };
+    }
+
+    function setStatus(msg) {
+        document.getElementById('status-bar').innerText = msg;
+    }
+
+    function setTool(toolName) {
+        currentTool = toolName;
+        document.getElementById('tool-sam').classList.remove('active');
+        document.getElementById('tool-brush').classList.remove('active');
+        document.getElementById('tool-eraser').classList.remove('active');
+        document.getElementById('tool-pan').classList.remove('active');
+        document.getElementById(`tool-${toolName}`).classList.add('active');
+        
+        workspace.style.cursor = (toolName === 'pan') ? 'grab' : 'crosshair';
+        updateCursorPreview(lastMouseE);
+    }
+
+    // --- Image Loading ---
+    function loadImage(index) {
+        if (index < 0 || index >= dataset.length) return;
+        currentIndex = index;
+        const imgData = dataset[currentIndex];
+        
+        document.getElementById('image-info').innerHTML = `
+            <b>File:</b> ${imgData.filename}<br>
+            <b>Status:</b> ${imgData.status === 'annotated' ? '✅ Annotated' : '❌ Unannotated'}<br>
+            <i>Image ${index + 1} of ${dataset.length}</i>
+        `;
+        
+        // Reset state
+        clearSAMPoints();
+        ctxMask.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        
+        // Load image
+        const img = new Image();
+        img.onload = () => {
+            ctxImage.clearRect(0, 0, imageCanvas.width, imageCanvas.height);
+            ctxImage.drawImage(img, 0, 0);
+            
+            // Load mask if exists
+            if (imgData.mask_url) {
+                const maskImg = new Image();
+                maskImg.onload = () => {
+                    ctxMask.globalCompositeOperation = 'source-over';
+                    ctxMask.drawImage(maskImg, 0, 0);
+                    tintMaskGreen();
+                };
+                maskImg.src = imgData.mask_url + "?t=" + new Date().getTime(); // cache bust
+            }
+        };
+        img.src = imgData.raw_url;
+        setStatus("Ready.");
+    }
+    
+    function tintMaskGreen() {
+        const imgData = ctxMask.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+        const data = imgData.data;
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i] > 0 || data[i+1] > 0 || data[i+2] > 0) {
+                data[i] = 0; data[i+1] = 255; data[i+2] = 0; data[i+3] = 255;
+            } else {
+                data[i+3] = 0;
+            }
+        }
+        ctxMask.putImageData(imgData, 0, 0);
+    }
+
+    // --- Zoom and Pan ---
+    const mainArea = document.getElementById('main-area');
+    
+    function updateTransform() {
+        workspace.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+    }
+    
+    function zoomInOut(factor) {
+        const rect = mainArea.getBoundingClientRect();
+        const mouseX = rect.width / 2;
+        const mouseY = rect.height / 2;
+        
+        applyZoom(factor, mouseX, mouseY);
+    }
+    
+    function resetZoom() {
+        scale = 1; panX = 0; panY = 0;
+        updateTransform();
+        updateCursorPreview(lastMouseE);
+    }
+    
+    function applyZoom(zoomMultiplier, mouseX, mouseY) {
+        const rect = mainArea.getBoundingClientRect();
+        
+        // Find base offset of the workspace due to flexbox centering (when pan=0, scale=1)
+        const baseLeft = (rect.width - 768) / 2;
+        const baseTop = (rect.height - 768) / 2;
+        
+        // Calculate the specific image coordinate that is currently under the mouse
+        const pointX = (mouseX - baseLeft - panX) / scale;
+        const pointY = (mouseY - baseTop - panY) / scale;
+        
+        scale *= zoomMultiplier;
+        scale = Math.max(0.5, Math.min(scale, 10)); // bounds
+        
+        // Calculate new pan to keep that specific image coordinate exactly under the mouse
+        panX = mouseX - baseLeft - (pointX * scale);
+        panY = mouseY - baseTop - (pointY * scale);
+        
+        updateTransform();
+        updateCursorPreview(lastMouseE);
+    }
+    
+    // Scroll to zoom
+    mainArea.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const zoomSensitivity = 0.15;
+        const zoomMultiplier = e.deltaY > 0 ? (1 - zoomSensitivity) : (1 + zoomSensitivity);
+        
+        const rect = mainArea.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        
+        applyZoom(zoomMultiplier, mouseX, mouseY);
+    });
+
+    // --- Interaction Logic ---
+    let isDrawing = false;
+    let lastMouseE = null;
+    
+    function getMousePos(e) {
+        const rect = workspace.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / scale;
+        const y = (e.clientY - rect.top) / scale;
+        return { x: Math.round(x), y: Math.round(y) };
+    }
+
+    function updateCursorPreview(e) {
+        if (!e) return;
+        lastMouseE = e;
+        
+        // Only show brush preview if using Brush/Eraser or holding SHIFT
+        if (currentTool === 'brush' || currentTool === 'eraser' || e.shiftKey) {
+            cursorPreview.style.display = 'block';
+            
+            // The brush preview circle needs to match the scaled brush size!
+            // Since it floats over the screen (not scaled by CSS transform on workspace),
+            // we multiply by scale so it perfectly matches the real footprint.
+            const scaledSize = (brushSize * 2) * scale;
+            
+            cursorPreview.style.width = `${scaledSize}px`;
+            cursorPreview.style.height = `${scaledSize}px`;
+            cursorPreview.style.left = `${e.clientX}px`;
+            cursorPreview.style.top = `${e.clientY}px`;
+            
+            if (e.shiftKey) {
+                cursorPreview.style.borderColor = 'rgba(255, 255, 0, 0.8)'; // Yellow to indicate override
+            } else {
+                cursorPreview.style.borderColor = 'rgba(255, 255, 255, 0.8)';
+            }
+        } else {
+            cursorPreview.style.display = 'none';
+        }
+    }
+
+    // Disable context menu inside main area
+    mainArea.addEventListener('contextmenu', e => e.preventDefault());
+
+    mainArea.addEventListener('mousedown', (e) => {
+        // Panning logic: spacebar, middle mouse, or dedicated pan tool
+        if (e.button === 1 || isSpacebarDown || currentTool === 'pan') {
+            isPanning = true;
+            startPanX = e.clientX - panX;
+            startPanY = e.clientY - panY;
+            workspace.style.cursor = 'grabbing';
+            cursorPreview.style.display = 'none';
+            e.preventDefault();
+            return;
+        }
+        
+        if (e.target !== workspace && e.target.parentNode !== workspace) return;
+        
+        const pos = getMousePos(e);
+        
+        // Shift modifier overrides tool completely for manual editing!
+        if (e.shiftKey) {
+            isDrawing = true;
+            drawBrush(pos.x, pos.y, e.button === 0 ? 'brush' : 'eraser');
+            return;
+        }
+        
+        if (currentTool === 'sam') {
+            if (e.button === 0) { // Left click
+                samPoints.push([pos.x, pos.y]);
+                samLabels.push(1);
+            } else if (e.button === 2) { // Right click
+                samPoints.push([pos.x, pos.y]);
+                samLabels.push(0);
+            }
+            drawUI();
+            runSAM();
+        } else if (currentTool === 'brush' || currentTool === 'eraser') {
+            isDrawing = true;
+            drawBrush(pos.x, pos.y, e.button === 2 ? 'eraser' : currentTool);
+        }
+    });
+    
+    window.addEventListener('mousemove', (e) => {
+        if (isPanning) {
+            panX = e.clientX - startPanX;
+            panY = e.clientY - startPanY;
+            updateTransform();
+            return;
+        }
+        
+        updateCursorPreview(e);
+        
+        if (isDrawing) {
+            const pos = getMousePos(e);
+            
+            // If drawing with SHIFT
+            if (e.shiftKey) {
+                drawBrush(pos.x, pos.y, e.buttons === 1 ? 'brush' : 'eraser');
+            } else if (currentTool === 'brush' || currentTool === 'eraser') {
+                drawBrush(pos.x, pos.y, e.buttons === 2 ? 'eraser' : currentTool);
+            }
+        }
+    });
+    
+    window.addEventListener('mouseup', () => {
+        isPanning = false;
+        isDrawing = false;
+        workspace.style.cursor = isSpacebarDown ? 'grab' : 'crosshair';
+        updateCursorPreview(lastMouseE);
+    });
+
+    // Keyboard controls
+    window.addEventListener('keydown', (e) => {
+        if (e.code === 'Space') {
+            e.preventDefault(); // always prevent scrolling or clicking buttons
+            isSpacebarDown = true;
+            workspace.style.cursor = 'grab';
+            cursorPreview.style.display = 'none';
+        }
+        if (e.key === 'a') commitSAMField();
+        if (e.key === 'c') clearSAMPoints();
+        if (e.key === 'Enter') saveMask();
+        if (e.key === '1') setTool('sam');
+        if (e.key === '2') setTool('brush');
+        if (e.key === '3') setTool('eraser');
+        if (e.key === '4') setTool('pan');
+        
+        if (e.key === 'Shift') {
+            updateCursorPreview(lastMouseE);
+        }
+    });
+    
+    window.addEventListener('keyup', (e) => {
+        if (e.code === 'Space') {
+            isSpacebarDown = false;
+            workspace.style.cursor = 'crosshair';
+            updateCursorPreview(lastMouseE);
+        }
+        if (e.key === 'Shift') {
+            updateCursorPreview(lastMouseE);
+        }
+    });
+    
+    function drawBrush(x, y, effectiveTool) {
+        ctxMask.beginPath();
+        ctxMask.arc(x, y, brushSize, 0, 2 * Math.PI, false);
+        if (effectiveTool === 'brush') {
+            ctxMask.globalCompositeOperation = 'source-over';
+            ctxMask.fillStyle = 'rgba(0, 255, 0, 1)';
+            ctxMask.fill();
+            
+            // Also draw on TempMask so you can paint over active SAM predictions
+            ctxTempMask.globalCompositeOperation = 'source-over';
+            ctxTempMask.fillStyle = 'rgba(0, 255, 0, 1)';
+            ctxTempMask.fill();
+        } else {
+            // Eraser
+            ctxMask.globalCompositeOperation = 'destination-out';
+            ctxMask.fill();
+            ctxMask.globalCompositeOperation = 'source-over';
+            
+            // Erase TempMask too
+            ctxTempMask.globalCompositeOperation = 'destination-out';
+            ctxTempMask.fill();
+            ctxTempMask.globalCompositeOperation = 'source-over';
+        }
+    }
+
+    function drawUI() {
+        ctxUi.clearRect(0, 0, uiCanvas.width, uiCanvas.height);
+        for(let i=0; i<samPoints.length; i++) {
+            const p = samPoints[i];
+            const l = samLabels[i];
+            ctxUi.beginPath();
+            ctxUi.arc(p[0], p[1], 5, 0, 2*Math.PI);
+            ctxUi.fillStyle = l === 1 ? '#00ff00' : '#ff0000';
+            ctxUi.fill();
+            ctxUi.lineWidth = 2;
+            ctxUi.strokeStyle = '#ffffff';
+            ctxUi.stroke();
+        }
+    }
+
+    async function runSAM() {
+        const imgData = dataset[currentIndex];
+        setStatus("Running SAM inference...");
+        try {
+            const res = await fetch('/api/predict', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    split: imgData.split,
+                    filename: imgData.filename,
+                    points: samPoints,
+                    labels: samLabels
+                })
+            });
+            const data = await res.json();
+            if (data.mask_b64) {
+                const samImg = new Image();
+                samImg.onload = () => {
+                    ctxTempMask.clearRect(0, 0, 768, 768);
+                    ctxTempMask.globalCompositeOperation = 'source-over';
+                    ctxTempMask.drawImage(samImg, 0, 0);
+                    // Tint temp mask green
+                    const imgD = ctxTempMask.getImageData(0, 0, 768, 768);
+                    const d = imgD.data;
+                    for (let i = 0; i < d.length; i += 4) {
+                        if (d[i] > 0 || d[i+1] > 0 || d[i+2] > 0) {
+                            d[i] = 0; d[i+1] = 255; d[i+2] = 0; d[i+3] = 255;
+                        } else {
+                            d[i+3] = 0;
+                        }
+                    }
+                    ctxTempMask.putImageData(imgD, 0, 0);
+                    setStatus("Done.");
+                };
+                samImg.src = data.mask_b64;
+            }
+        } catch (e) {
+            setStatus("Error running SAM.");
+            console.error(e);
+        }
+    }
+
+    function commitSAMField() {
+        ctxMask.drawImage(tempMaskCanvas, 0, 0);
+        ctxTempMask.clearRect(0, 0, 768, 768);
+        samPoints = [];
+        samLabels = [];
+        drawUI();
+        setStatus("Field Added.");
+    }
+    
+    function clearSAMPoints() {
+        samPoints = [];
+        samLabels = [];
+        drawUI();
+        ctxTempMask.clearRect(0, 0, 768, 768);
+    }
+    
+    function resetMask() {
+        ctxMask.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+        clearSAMPoints();
+    }
+
+    async function saveMask() {
+        setStatus("Saving mask...");
+        const imgData = dataset[currentIndex];
+        
+        const mask_b64 = maskCanvas.toDataURL('image/png');
+        
+        try {
+            const res = await fetch('/api/save', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    split: imgData.split,
+                    filename: imgData.filename,
+                    mask_b64: mask_b64
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                imgData.status = 'annotated';
+                imgData.mask_url = data.mask_url;
+                setStatus("Saved!");
+                loadImage(currentIndex + 1); // move next
+            }
+        } catch(e) {
+            setStatus("Error saving.");
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>
