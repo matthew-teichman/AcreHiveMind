@@ -24,4 +24,14 @@ dist-ssr
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
+
+# ML dataset and weights
+ml/dataset/
+mobile_sam.pt
+sam_b*
+sam_*.pt
+sam_*.pth
+sam2_*.pt
+sam2_*.pth
+*.pt
+*.pth
